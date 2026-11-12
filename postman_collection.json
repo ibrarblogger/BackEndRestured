@@ -1,0 +1,164 @@
+{
+  "info": {
+    "_postman_id": "a7f14b60-5c11-4d89-9a10-rms-backend-v1",
+    "name": "Restaurant Management System ERP/POS API (Phases 1-5)",
+    "description": "Complete OpenAPI-aligned collection for Admin Panel, POS, Kitchen KDS, Inventory, Payroll, Delivery, Reports & Multi-Currency/Language Localization connected to Supabase PostgreSQL.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:5000/api/v1" },
+    { "key": "accessToken", "value": "" },
+    { "key": "refreshToken", "value": "" },
+    { "key": "branchId", "value": "2a6afa14-7e63-48a5-9291-3d52bba2c3be" }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }]
+  },
+  "item": [
+    {
+      "name": "1. Auth & Health",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": { "method": "GET", "url": "{{baseUrl}}/health" }
+        },
+        {
+          "name": "Login (Super Admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json?.data?.accessToken) { pm.collectionVariables.set('accessToken', json.data.accessToken); }",
+                  "if (json?.data?.refreshToken) { pm.collectionVariables.set('refreshToken', json.data.refreshToken); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@rms-enterprise.local\",\n  \"password\": \"Admin@123456!\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/login"
+          }
+        },
+        {
+          "name": "Current User Profile",
+          "request": { "method": "GET", "url": "{{baseUrl}}/auth/me" }
+        }
+      ]
+    },
+    {
+      "name": "2. Branches, Multi-Currency & Multi-Language (Admin Only)",
+      "item": [
+        {
+          "name": "Get Localization (Active Currency + Language + Translations)",
+          "request": { "method": "GET", "url": "{{baseUrl}}/branches/localization" }
+        },
+        {
+          "name": "List 35 Supported Currencies",
+          "request": { "method": "GET", "url": "{{baseUrl}}/branches/currencies" }
+        },
+        {
+          "name": "Switch Currency (Admin Only)",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"currency\": \"PKR\",\n  \"applyToAllBranches\": true\n}" },
+            "url": "{{baseUrl}}/branches/currency"
+          }
+        },
+        {
+          "name": "List 14 Supported Languages",
+          "request": { "method": "GET", "url": "{{baseUrl}}/branches/languages?lang=ur" }
+        },
+        {
+          "name": "Switch Language (Admin Only)",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"language\": \"ur\",\n  \"applyToAllBranches\": true\n}" },
+            "url": "{{baseUrl}}/branches/language"
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Menu & Tables",
+      "item": [
+        { "name": "List Menu Categories", "request": { "method": "GET", "url": "{{baseUrl}}/menu/categories" } },
+        { "name": "List Menu Items", "request": { "method": "GET", "url": "{{baseUrl}}/menu/items" } },
+        { "name": "List Floor Plan Tables", "request": { "method": "GET", "url": "{{baseUrl}}/tables" } },
+        { "name": "List Reservations", "request": { "method": "GET", "url": "{{baseUrl}}/tables/reservations" } }
+      ]
+    },
+    {
+      "name": "4. Orders, POS & Kitchen KDS",
+      "item": [
+        { "name": "List Orders", "request": { "method": "GET", "url": "{{baseUrl}}/orders" } },
+        { "name": "List Active Kitchen Tickets", "request": { "method": "GET", "url": "{{baseUrl}}/kitchen/tickets" } }
+      ]
+    },
+    {
+      "name": "5. Payments, Inventory, Suppliers & Customers CRM",
+      "item": [
+        { "name": "List Payments", "request": { "method": "GET", "url": "{{baseUrl}}/payments" } },
+        { "name": "List Ingredients", "request": { "method": "GET", "url": "{{baseUrl}}/inventory/ingredients" } },
+        { "name": "Low Stock Alerts", "request": { "method": "GET", "url": "{{baseUrl}}/inventory/low-stock" } },
+        { "name": "List Suppliers", "request": { "method": "GET", "url": "{{baseUrl}}/suppliers" } },
+        { "name": "List Purchase Orders", "request": { "method": "GET", "url": "{{baseUrl}}/suppliers/purchase-orders" } },
+        { "name": "List Customers", "request": { "method": "GET", "url": "{{baseUrl}}/customers" } },
+        { "name": "List Promo Coupons", "request": { "method": "GET", "url": "{{baseUrl}}/customers/coupons" } }
+      ]
+    },
+    {
+      "name": "6. Staff & Payroll",
+      "item": [
+        { "name": "List Employees", "request": { "method": "GET", "url": "{{baseUrl}}/staff/employees" } },
+        { "name": "List Shifts", "request": { "method": "GET", "url": "{{baseUrl}}/staff/shifts" } },
+        { "name": "List Attendance", "request": { "method": "GET", "url": "{{baseUrl}}/staff/attendance" } },
+        { "name": "List Payroll Runs", "request": { "method": "GET", "url": "{{baseUrl}}/staff/payroll" } }
+      ]
+    },
+    {
+      "name": "7. Expenses & Accounting",
+      "item": [
+        { "name": "List Expense Categories", "request": { "method": "GET", "url": "{{baseUrl}}/expenses/categories" } },
+        { "name": "List Expenses", "request": { "method": "GET", "url": "{{baseUrl}}/expenses" } },
+        { "name": "Profit & Loss Statement", "request": { "method": "GET", "url": "{{baseUrl}}/expenses/accounting/pnl" } },
+        { "name": "Daily Closing Summary", "request": { "method": "GET", "url": "{{baseUrl}}/expenses/accounting/daily-closing" } },
+        { "name": "Cash Flow Statement", "request": { "method": "GET", "url": "{{baseUrl}}/expenses/accounting/cash-flow" } },
+        { "name": "Tax Report", "request": { "method": "GET", "url": "{{baseUrl}}/expenses/accounting/tax-report" } }
+      ]
+    },
+    {
+      "name": "8. Delivery & Riders",
+      "item": [
+        { "name": "List Delivery Zones", "request": { "method": "GET", "url": "{{baseUrl}}/delivery/zones" } },
+        { "name": "List Riders", "request": { "method": "GET", "url": "{{baseUrl}}/delivery/riders" } },
+        { "name": "List Deliveries", "request": { "method": "GET", "url": "{{baseUrl}}/delivery" } }
+      ]
+    },
+    {
+      "name": "9. Reports, Dashboard & Notifications",
+      "item": [
+        { "name": "Dashboard KPIs", "request": { "method": "GET", "url": "{{baseUrl}}/dashboard/kpis?days=30&lang=en" } },
+        { "name": "Sales by Item (JSON)", "request": { "method": "GET", "url": "{{baseUrl}}/reports/sales-by-item?format=json" } },
+        { "name": "Sales by Time (CSV Export)", "request": { "method": "GET", "url": "{{baseUrl}}/reports/sales-by-time?format=csv" } },
+        { "name": "Inventory Valuation (Excel Export)", "request": { "method": "GET", "url": "{{baseUrl}}/reports/inventory-valuation?format=excel" } },
+        { "name": "Wastage Report (PDF Export)", "request": { "method": "GET", "url": "{{baseUrl}}/reports/wastage?format=pdf" } },
+        { "name": "Customer Retention Report", "request": { "method": "GET", "url": "{{baseUrl}}/reports/customer-retention" } },
+        { "name": "Discount Usage Report", "request": { "method": "GET", "url": "{{baseUrl}}/reports/discount-usage" } },
+        { "name": "List Notifications", "request": { "method": "GET", "url": "{{baseUrl}}/notifications" } },
+        { "name": "Notification Preferences", "request": { "method": "GET", "url": "{{baseUrl}}/notifications/preferences" } },
+        { "name": "Background Job Queue Status", "request": { "method": "GET", "url": "{{baseUrl}}/jobs/status" } }
+      ]
+    }
+  ]
+}
+
