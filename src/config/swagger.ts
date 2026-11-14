@@ -21,8 +21,12 @@ export const openApiSpec = {
   },
   servers: [
     {
+      url: '/api/v1',
+      description: 'API v1 (Same-Origin / Production)',
+    },
+    {
       url: `${env.API_BASE_URL}/api/v1`,
-      description: 'API v1',
+      description: 'API v1 (Configured Base URL)',
     },
   ],
   components: {
