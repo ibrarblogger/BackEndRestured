@@ -60,7 +60,10 @@ export function createApp(): Application {
     // 1. Check query parameter __path forwarded from vercel.json rewrite
     const queryParam = req.query?.__path;
     if (typeof queryParam === 'string' && queryParam.length > 0) {
-      rawPath = queryParam.startsWith('/') ? queryParam : `/${queryParam}`;
+      let cleaned = decodeURIComponent(queryParam).trim();
+      cleaned = cleaned.replace(/^(api\/index(\.js)?\/?)+/i, '');
+      cleaned = cleaned.startsWith('/') ? cleaned : `/${cleaned}`;
+      rawPath = cleaned;
     }
     // 2. Check Vercel routing headers
     else if (typeof req.headers['x-matched-path'] === 'string') {
@@ -85,12 +88,16 @@ export function createApp(): Application {
       } else {
         req.url = rawPath;
       }
+      req.originalUrl = req.url;
     } else if (req.url === '/api/index.js' || req.url === '/api/index' || req.url === '/api') {
       req.url = '/';
+      req.originalUrl = '/';
     } else if (req.url.startsWith('/api/index.js')) {
-      req.url = req.url.replace(/^\/api\/index\.js/, '') || '/';
+      req.url = req.url.replace(/^\/api\/index\.js\/?/, '/') || '/';
+      req.originalUrl = req.url;
     } else if (req.url.startsWith('/api/index')) {
-      req.url = req.url.replace(/^\/api\/index/, '') || '/';
+      req.url = req.url.replace(/^\/api\/index\/?/, '/') || '/';
+      req.originalUrl = req.url;
     }
 
     next();
@@ -203,7 +210,13 @@ export function createApp(): Application {
       'https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.11.0/swagger-ui-standalone-preset.js',
     ],
   };
-  app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(openApiSpec, swaggerOptions));
+
+  // Serve Swagger UI HTML directly on both with and without trailing slash (no redirect loop)
+  app.get(['/api/docs', '/api/docs/'], (_req, res) => {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(swaggerUi.generateHTML(openApiSpec, swaggerOptions));
+  });
+  app.use('/api/docs', swaggerUi.serveFiles(openApiSpec, swaggerOptions));
 
   // 5. Root & Health Check Endpoints
   app.get('/', (_req, res) => {
