@@ -53,7 +53,50 @@ export function createApp(): Application {
   // Trust proxy for reverse proxy platforms (Vercel, AWS ALB, Cloudflare)
   app.set('trust proxy', 1);
 
-  // 0. LIGHTWEIGHT HEALTH CHECK (No auth, no DB, registered before all middleware)
+  // Normalize rewritten URLs from Vercel Serverless routing (/api/index -> /)
+  app.use((req, _res, next) => {
+    let rawPath: string | undefined;
+
+    // 1. Check query parameter __path forwarded from vercel.json rewrite
+    const queryParam = req.query?.__path;
+    if (typeof queryParam === 'string' && queryParam.length > 0) {
+      rawPath = queryParam.startsWith('/') ? queryParam : `/${queryParam}`;
+    }
+    // 2. Check Vercel routing headers
+    else if (typeof req.headers['x-matched-path'] === 'string') {
+      const matched = req.headers['x-matched-path'];
+      if (matched.startsWith('/') && !matched.startsWith('/api/index')) {
+        rawPath = matched;
+      }
+    } else if (typeof req.headers['x-forwarded-uri'] === 'string') {
+      const forwarded = req.headers['x-forwarded-uri'];
+      if (forwarded.startsWith('/') && !forwarded.startsWith('/api/index')) {
+        rawPath = forwarded;
+      }
+    }
+
+    if (rawPath) {
+      const queryIdx = req.url.indexOf('?');
+      if (queryIdx !== -1) {
+        const searchParams = new URLSearchParams(req.url.slice(queryIdx));
+        searchParams.delete('__path');
+        const remainingQuery = searchParams.toString();
+        req.url = rawPath + (remainingQuery ? `?${remainingQuery}` : '');
+      } else {
+        req.url = rawPath;
+      }
+    } else if (req.url === '/api/index.js' || req.url === '/api/index' || req.url === '/api') {
+      req.url = '/';
+    } else if (req.url.startsWith('/api/index.js')) {
+      req.url = req.url.replace(/^\/api\/index\.js/, '') || '/';
+    } else if (req.url.startsWith('/api/index')) {
+      req.url = req.url.replace(/^\/api\/index/, '') || '/';
+    }
+
+    next();
+  });
+
+  // 0. LIGHTWEIGHT HEALTH CHECK (No auth, no DB, registered right after URL normalization)
   app.get('/health', (_req, res) => {
     res.status(200).json({
       ok: true,
@@ -83,17 +126,6 @@ export function createApp(): Application {
         time: new Date().toISOString(),
       });
     }
-  });
-
-  // Normalize rewritten URLs from Vercel Serverless routing (/api/index -> /)
-  app.use((req, _res, next) => {
-    const matched = (req.headers['x-matched-path'] || req.headers['x-forwarded-uri']) as string | undefined;
-    if (matched && matched.startsWith('/') && !matched.startsWith('/api/index')) {
-      req.url = matched;
-    } else if (req.url.startsWith('/api/index')) {
-      req.url = req.url.replace(/^\/api\/index/, '') || '/';
-    }
-    next();
   });
 
   // Missing required environment variables guard for business API endpoints
