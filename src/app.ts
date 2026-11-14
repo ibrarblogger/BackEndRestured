@@ -40,6 +40,20 @@ export function createApp(): Application {
   registerBackgroundJobHandlers();
   const app = express();
 
+  // Trust proxy for reverse proxy platforms (Vercel, AWS, etc.)
+  app.set('trust proxy', 1);
+
+  // Normalize rewritten URLs from Vercel Serverless routing
+  app.use((req, _res, next) => {
+    const original = (req.headers['x-matched-path'] || req.headers['x-forwarded-uri']) as string | undefined;
+    if (original && original.startsWith('/') && original !== '/api/index' && original !== '/api') {
+      req.url = original;
+    } else if (req.url === '/api/index' || req.url === '/api') {
+      req.url = '/';
+    }
+    next();
+  });
+
   // 1. Request ID & Structured Logging
   app.use(requestIdMiddleware);
   app.use(
