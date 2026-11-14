@@ -84,6 +84,10 @@ export function createApp(): Application {
 
   // 4. Static Local Uploads Fallback & OpenAPI Docs
   app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+  app.get('/api/docs.json', (_req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.send(openApiSpec);
+  });
   app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(openApiSpec));
 
   // 5. Root & Health Check Endpoints
