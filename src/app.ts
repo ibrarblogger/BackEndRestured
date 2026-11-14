@@ -158,8 +158,21 @@ export function createApp(): Application {
     })
   );
 
-  // 2. Security Headers & CORS Whitelist
-  app.use(helmet());
+  // 2. Security Headers & CORS Whitelist (CSP allows Swagger CDN & inline styles/scripts)
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", 'https://cdnjs.cloudflare.com', 'https://cdn.jsdelivr.net'],
+          styleSrc: ["'self'", "'unsafe-inline'", 'https://cdnjs.cloudflare.com', 'https://cdn.jsdelivr.net'],
+          imgSrc: ["'self'", 'data:', 'https:'],
+          connectSrc: ["'self'", 'https:'],
+          fontSrc: ["'self'", 'https:', 'data:'],
+        },
+      },
+    })
+  );
   const allowedOrigins = new Set([
     ...env.CORS_ORIGINS,
     env.API_BASE_URL,
@@ -201,22 +214,49 @@ export function createApp(): Application {
     res.send(openApiSpec);
   });
 
-  const swaggerOptions = {
-    customCss: '.swagger-ui .topbar { display: none }',
-    customSiteTitle: 'Restaurant Management System API Docs',
-    customCssUrl: 'https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.11.0/swagger-ui.min.css',
-    customJs: [
-      'https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.11.0/swagger-ui-bundle.js',
-      'https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.11.0/swagger-ui-standalone-preset.js',
-    ],
-  };
+  const swaggerHtml = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Restaurant Management System (ERP/POS) API Docs</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.11.0/swagger-ui.min.css" />
+  <style>
+    html { box-sizing: border-box; overflow: -moz-scrollbars-vertical; overflow-y: scroll; }
+    *, *:before, *:after { box-sizing: inherit; }
+    body { margin: 0; background: #fafafa; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    .swagger-ui .topbar { display: none }
+  </style>
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.11.0/swagger-ui-bundle.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.11.0/swagger-ui-standalone-preset.min.js"></script>
+  <script>
+    window.onload = function() {
+      SwaggerUIBundle({
+        spec: ${JSON.stringify(openApiSpec)},
+        dom_id: '#swagger-ui',
+        deepLinking: true,
+        presets: [
+          SwaggerUIBundle.presets.apis,
+          SwaggerUIStandalonePreset
+        ],
+        layout: "BaseLayout"
+      });
+    };
+  </script>
+</body>
+</html>`;
 
-  // Serve Swagger UI HTML directly on both with and without trailing slash (no redirect loop)
+  // Serve Swagger UI HTML directly on both with and without trailing slash
   app.get(['/api/docs', '/api/docs/'], (_req, res) => {
+    res.removeHeader('Content-Security-Policy');
+    res.removeHeader('X-Content-Security-Policy');
+    res.removeHeader('X-WebKit-CSP');
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.send(swaggerUi.generateHTML(openApiSpec, swaggerOptions));
+    res.send(swaggerHtml);
   });
-  app.use('/api/docs', swaggerUi.serveFiles(openApiSpec, swaggerOptions));
 
   // 5. Root & Health Check Endpoints
   app.get('/', (_req, res) => {
