@@ -1,14 +1,14 @@
 {
   "version": 2,
   "functions": {
-    "api/*.ts": {
-      "includeFiles": "node_modules/.prisma/client/**"
+    "api/index.js": {
+      "includeFiles": "{dist/**,prisma/**}"
     }
   },
   "rewrites": [
     {
       "source": "/(.*)",
-      "destination": "/api/index"
+      "destination": "/api/index.js"
     }
   ]
 }
