@@ -42,3 +42,6 @@ bootstrap().catch((err) => {
   logger.error({ err }, 'Fatal error during server bootstrap');
   process.exit(1);
 });
+
+export { server, app };
+export default server;
