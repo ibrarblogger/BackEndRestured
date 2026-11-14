@@ -1,24 +1,36 @@
 import { PrismaClient } from '@prisma/client';
 import { env } from './env';
 import { logger } from './logger';
+import { isServerless } from './runtime';
 import { ServiceUnavailableError } from '../errors';
 
 declare global {
   var __prisma: PrismaClient | undefined;
 }
 
+// Single shared PrismaClient singleton to prevent connection exhaustion in serverless & dev
 export const prisma: PrismaClient =
   global.__prisma ||
   new PrismaClient({
     log: env.NODE_ENV === 'development' ? ['warn', 'error'] : ['error'],
   });
 
-if (env.NODE_ENV !== 'production') {
+if (env.NODE_ENV !== 'production' || isServerless) {
   global.__prisma = prisma;
 }
 
 /**
+ * Checks database health via simple SELECT 1 without blocking server bootstrap.
+ */
+export async function checkDatabaseHealth(): Promise<{ ok: boolean; latencyMs: number }> {
+  const start = Date.now();
+  await prisma.$queryRaw`SELECT 1`;
+  return { ok: true, latencyMs: Date.now() - start };
+}
+
+/**
  * Retries connecting to Supabase PostgreSQL if the free-tier database is paused or cold-starting.
+ * Used exclusively by persistent servers (server.ts), never at serverless import time.
  */
 export async function connectDatabaseWithRetry(maxRetries = 4, delayMs = 2000): Promise<boolean> {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {

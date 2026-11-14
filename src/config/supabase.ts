@@ -1,8 +1,10 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { env } from './env';
 import { logger } from './logger';
+import { isServerless } from './runtime';
 
 export type StorageBucket = 'menu-images' | 'receipts' | 'avatars';
 
@@ -35,7 +37,7 @@ export function getSupabaseClient(): SupabaseClient | null {
 /**
  * Uploads a file buffer to Supabase Storage (`menu-images`, `receipts`, `avatars`)
  * using the server-side SUPABASE_SECRET_KEY (`sb_secret_...`).
- * Automatically falls back to local `/uploads/<bucket>/` disk storage if keys are missing.
+ * Automatically falls back to /tmp (serverless) or /uploads/<bucket>/ (local disk).
  */
 export async function uploadFile(params: {
   bucket: StorageBucket;
@@ -58,7 +60,7 @@ export async function uploadFile(params: {
     if (error) {
       logger.warn(
         { bucket, err: error.message },
-        'Supabase Storage upload failed; falling back to local disk storage'
+        'Supabase Storage upload failed; falling back to temporary disk storage'
       );
     } else {
       if (isPublic) {
@@ -75,13 +77,19 @@ export async function uploadFile(params: {
     }
   }
 
-  // Fallback to local disk uploads
-  const uploadDir = path.join(process.cwd(), 'uploads', bucket);
-  fs.mkdirSync(uploadDir, { recursive: true });
-  const fullPath = path.join(uploadDir, safeName);
-  fs.writeFileSync(fullPath, buffer);
+  // Fallback storage: On Vercel / serverless, filesystem is read-only except /tmp
+  const uploadDir = isServerless
+    ? path.join(os.tmpdir(), 'uploads', bucket)
+    : path.join(process.cwd(), 'uploads', bucket);
+
+  try {
+    fs.mkdirSync(uploadDir, { recursive: true });
+    const fullPath = path.join(uploadDir, safeName);
+    fs.writeFileSync(fullPath, buffer);
+  } catch (fsErr: any) {
+    logger.error({ err: fsErr?.message }, 'Failed to write fallback upload file to disk');
+  }
 
   const localUrl = `${env.API_BASE_URL}/uploads/${bucket}/${safeName}`;
   return { url: localUrl, storageProvider: 'local' };
 }
-

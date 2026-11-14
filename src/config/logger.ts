@@ -11,6 +11,8 @@ export const logger = pino({
       'body.currentPassword',
       'body.newPassword',
       'passwordHash',
+      'DATABASE_URL',
+      'DIRECT_URL',
       'SUPABASE_SECRET_KEY',
       'JWT_ACCESS_SECRET',
       'JWT_REFRESH_SECRET',

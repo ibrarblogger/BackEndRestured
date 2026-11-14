@@ -4,6 +4,7 @@ import { randomUUID } from 'crypto';
 import { env } from '../config/env';
 import { logger } from '../config/logger';
 import { isRedisConfigured } from '../config/redis';
+import { isServerless } from '../config/runtime';
 
 export type BackgroundJobType =
   | 'CRM_CAMPAIGN'
@@ -42,31 +43,36 @@ class BackgroundJobQueue {
   }
 
   private ensureBullInitialized() {
-    if (!isRedisConfigured() || this.bullQueue) return;
+    // BullMQ persistent workers and Redis connections are disabled on Serverless (Vercel)
+    if (isServerless || !isRedisConfigured() || this.bullQueue) return;
 
-    const connection = new IORedis(env.REDIS_URL as string, {
-      maxRetriesPerRequest: null,
-    });
+    try {
+      const connection = new IORedis(env.REDIS_URL as string, {
+        maxRetriesPerRequest: null,
+      });
 
-    this.bullQueue = new Queue('rms-background-jobs', { connection });
-    this.bullWorker = new Worker(
-      'rms-background-jobs',
-      async (job) => {
-        const jobType = job.name as BackgroundJobType;
-        const handler = this.handlers.get(jobType);
-        if (!handler) {
-          throw new Error(`No handler registered for job type "${jobType}"`);
-        }
-        return handler((job.data || {}) as Record<string, unknown>);
-      },
-      { connection }
-    );
-
-    this.bullWorker.on('failed', (job, err) => {
-      logger.error(
-        `BullMQ job failed (${job?.name ?? 'unknown'}): ${err.message}`
+      this.bullQueue = new Queue('rms-background-jobs', { connection });
+      this.bullWorker = new Worker(
+        'rms-background-jobs',
+        async (job) => {
+          const jobType = job.name as BackgroundJobType;
+          const handler = this.handlers.get(jobType);
+          if (!handler) {
+            throw new Error(`No handler registered for job type "${jobType}"`);
+          }
+          return handler((job.data || {}) as Record<string, unknown>);
+        },
+        { connection }
       );
-    });
+
+      this.bullWorker.on('failed', (job, err) => {
+        logger.error(
+          `BullMQ job failed (${job?.name ?? 'unknown'}): ${err.message}`
+        );
+      });
+    } catch (err: any) {
+      logger.error({ err: err?.message }, 'Failed to initialize BullMQ worker; falling back to in-memory');
+    }
   }
 
   async enqueue(
@@ -75,7 +81,7 @@ class BackgroundJobQueue {
   ): Promise<BackgroundJobRecord> {
     const id = randomUUID();
 
-    if (isRedisConfigured()) {
+    if (!isServerless && isRedisConfigured()) {
       this.ensureBullInitialized();
       if (this.bullQueue) {
         await this.bullQueue.add(type, payload, {
@@ -96,6 +102,7 @@ class BackgroundJobQueue {
       }
     }
 
+    // In-memory execution (used on Vercel serverless or when Redis is absent)
     const record: BackgroundJobRecord = {
       id,
       type,
@@ -140,7 +147,7 @@ class BackgroundJobQueue {
     const record: BackgroundJobRecord = {
       id,
       type,
-      mode: isRedisConfigured() ? 'bullmq' : 'memory',
+      mode: (!isServerless && isRedisConfigured()) ? 'bullmq' : 'memory',
       status: 'PROCESSING',
       payload,
       createdAt: new Date().toISOString(),
@@ -168,7 +175,9 @@ class BackgroundJobQueue {
 
   getStatusSummary() {
     return {
-      backend: isRedisConfigured() ? 'bullmq-redis' : 'in-memory-fallback',
+      serverless: isServerless,
+      backend: (!isServerless && isRedisConfigured()) ? 'bullmq-redis' : 'in-memory-fallback',
+      realtimeEnabled: !isServerless,
       registeredHandlers: Array.from(this.handlers.keys()),
       recentJobs: this.recentJobs.slice(0, 25),
     };
@@ -181,4 +190,3 @@ class BackgroundJobQueue {
 }
 
 export const jobQueue = new BackgroundJobQueue();
-

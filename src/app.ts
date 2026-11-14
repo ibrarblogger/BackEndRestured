@@ -4,13 +4,15 @@ import cors from 'cors';
 import express, { Application } from 'express';
 import helmet from 'helmet';
 import hpp from 'hpp';
+import os from 'os';
 import path from 'path';
 import pinoHttp from 'pino-http';
 import swaggerUi from 'swagger-ui-express';
-import { env } from './config/env';
+import { env, missingEnvVars } from './config/env';
 import { logger } from './config/logger';
+import { checkDatabaseHealth } from './config/prisma';
+import { isServerless } from './config/runtime';
 import { openApiSpec } from './config/swagger';
-import { registerBackgroundJobHandlers } from './jobs/handlers';
 import { jobsRoutes } from './jobs/routes';
 import { errorHandler, notFoundHandler } from './middlewares/error.middleware';
 import { globalRateLimiter } from './middlewares/rateLimit.middleware';
@@ -36,20 +38,73 @@ import { tablesRoutes } from './modules/tables/routes';
 import { usersRoutes } from './modules/users/routes';
 import { sendSuccess } from './utils/response';
 
+// Process-level unhandled exception & rejection monitors (logs stack traces to Vercel Runtime Logs)
+process.on('unhandledRejection', (reason: any) => {
+  console.error('❌ [Unhandled Rejection at Promise]:', reason?.stack || reason);
+});
+
+process.on('uncaughtException', (error: Error) => {
+  console.error('❌ [Uncaught Exception thrown]:', error?.stack || error);
+});
+
 export function createApp(): Application {
-  registerBackgroundJobHandlers();
   const app = express();
 
-  // Trust proxy for reverse proxy platforms (Vercel, AWS, etc.)
+  // Trust proxy for reverse proxy platforms (Vercel, AWS ALB, Cloudflare)
   app.set('trust proxy', 1);
 
-  // Normalize rewritten URLs from Vercel Serverless routing
+  // 0. LIGHTWEIGHT HEALTH CHECK (No auth, no DB, registered before all middleware)
+  app.get('/health', (_req, res) => {
+    res.status(200).json({
+      ok: true,
+      serverless: isServerless,
+      time: new Date().toISOString(),
+    });
+  });
+
+  // Database connectivity probe (SELECT 1 via Prisma)
+  app.get('/health/db', async (_req, res) => {
+    try {
+      const health = await checkDatabaseHealth();
+      res.status(200).json({
+        ok: true,
+        serverless: isServerless,
+        database: 'connected',
+        latencyMs: health.latencyMs,
+        time: new Date().toISOString(),
+      });
+    } catch (err: any) {
+      console.error('❌ Database health check failed:', err?.message || err);
+      res.status(503).json({
+        ok: false,
+        serverless: isServerless,
+        database: 'unreachable',
+        message: 'Database is temporarily unreachable or cold-starting. Please retry.',
+        time: new Date().toISOString(),
+      });
+    }
+  });
+
+  // Normalize rewritten URLs from Vercel Serverless routing (/api/index -> /)
   app.use((req, _res, next) => {
-    const original = (req.headers['x-matched-path'] || req.headers['x-forwarded-uri']) as string | undefined;
-    if (original && original.startsWith('/') && original !== '/api/index' && original !== '/api') {
-      req.url = original;
-    } else if (req.url === '/api/index' || req.url === '/api') {
-      req.url = '/';
+    const matched = (req.headers['x-matched-path'] || req.headers['x-forwarded-uri']) as string | undefined;
+    if (matched && matched.startsWith('/') && !matched.startsWith('/api/index')) {
+      req.url = matched;
+    } else if (req.url.startsWith('/api/index')) {
+      req.url = req.url.replace(/^\/api\/index/, '') || '/';
+    }
+    next();
+  });
+
+  // Missing required environment variables guard for business API endpoints
+  app.use('/api/v1', (_req, res, next) => {
+    if (missingEnvVars.length > 0) {
+      res.status(500).json({
+        success: false,
+        message: `Server misconfigured: missing ${missingEnvVars.join(', ')}`,
+        data: null,
+      });
+      return;
     }
     next();
   });
@@ -96,13 +151,27 @@ export function createApp(): Application {
   app.use(compression() as any);
   app.use(sanitizeMiddleware);
 
-  // 4. Static Local Uploads Fallback & OpenAPI Docs
-  app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+  // 4. Static Uploads (uses /tmp when serverless to avoid EROFS) & OpenAPI Docs
+  const uploadsStaticDir = isServerless
+    ? path.join(os.tmpdir(), 'uploads')
+    : path.join(process.cwd(), 'uploads');
+  app.use('/uploads', express.static(uploadsStaticDir));
+
   app.get('/api/docs.json', (_req, res) => {
     res.setHeader('Content-Type', 'application/json');
     res.send(openApiSpec);
   });
-  app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(openApiSpec));
+
+  const swaggerOptions = {
+    customCss: '.swagger-ui .topbar { display: none }',
+    customSiteTitle: 'Restaurant Management System API Docs',
+    customCssUrl: 'https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.11.0/swagger-ui.min.css',
+    customJs: [
+      'https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.11.0/swagger-ui-bundle.js',
+      'https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.11.0/swagger-ui-standalone-preset.js',
+    ],
+  };
+  app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(openApiSpec, swaggerOptions));
 
   // 5. Root & Health Check Endpoints
   app.get('/', (_req, res) => {
@@ -113,8 +182,10 @@ export function createApp(): Application {
         version: '1.0.0',
         status: 'running',
         environment: env.NODE_ENV,
+        serverless: isServerless,
         docsUrl: `${env.API_BASE_URL}/api/docs`,
-        healthUrl: `${env.API_BASE_URL}/api/v1/health`,
+        healthUrl: `${env.API_BASE_URL}/health`,
+        dbHealthUrl: `${env.API_BASE_URL}/health/db`,
         apiBaseUrl: `${env.API_BASE_URL}/api/v1`,
       },
       'Welcome to the Restaurant Management System API'
@@ -126,9 +197,12 @@ export function createApp(): Application {
       res,
       {
         version: 'v1',
+        serverless: isServerless,
         docsUrl: `${env.API_BASE_URL}/api/docs`,
         endpoints: {
-          health: '/api/v1/health',
+          health: '/health',
+          dbHealth: '/health/db',
+          apiHealth: '/api/v1/health',
           auth: '/api/v1/auth',
           users: '/api/v1/users',
           roles: '/api/v1/users/roles',
@@ -163,6 +237,7 @@ export function createApp(): Application {
       res,
       {
         status: 'ok',
+        serverless: isServerless,
         environment: env.NODE_ENV,
         timestamp: new Date().toISOString(),
         uptimeSeconds: Math.floor(process.uptime()),
@@ -200,3 +275,4 @@ export function createApp(): Application {
 }
 
 export const app = createApp();
+export default app;

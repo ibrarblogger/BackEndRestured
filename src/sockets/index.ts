@@ -2,6 +2,7 @@ import { Server as HttpServer } from 'http';
 import { Server, Socket } from 'socket.io';
 import { env } from '../config/env';
 import { logger } from '../config/logger';
+import { isServerless } from '../config/runtime';
 import { verifyAccessToken, AccessTokenPayload } from '../utils/jwt';
 
 export const SOCKET_EVENTS = {
@@ -24,7 +25,12 @@ export interface AuthenticatedSocket extends Socket {
 
 let ioInstance: Server | null = null;
 
-export function initSocketServer(httpServer: HttpServer): Server {
+export function initSocketServer(httpServer: HttpServer): Server | null {
+  if (isServerless) {
+    logger.info('⚡ [Socket.io] Realtime WebSocket server disabled in Serverless (Vercel) mode.');
+    return null;
+  }
+
   const allowedOrigins = new Set([
     ...env.CORS_ORIGINS,
     env.API_BASE_URL,
@@ -73,7 +79,6 @@ export function initSocketServer(httpServer: HttpServer): Server {
       return;
     }
 
-    // Automatically join rooms scoped by userId, roleSlug, and branchId
     socket.join(`user:${user.sub}`);
     socket.join(`role:${user.roleSlug}`);
 
@@ -82,7 +87,6 @@ export function initSocketServer(httpServer: HttpServer): Server {
       socket.join(`branch:${user.branchId}:role:${user.roleSlug}`);
     }
 
-    // Allow client to subscribe to a specific branch or kitchen station room if authorized
     socket.on('join:branch', (branchId: string) => {
       if (user.roleSlug === 'super-admin' || user.branchId === branchId) {
         socket.join(`branch:${branchId}`);
@@ -114,7 +118,8 @@ export function getIO(): Server | null {
 }
 
 /**
- * Emits a real-time Socket.io event to a specific branch room (and optionally a specific role or station).
+ * Emits a real-time Socket.io event to a specific branch room.
+ * Safely no-ops when running in serverless mode or when Socket.io is not initialized.
  */
 export function emitSocketEvent<T>(
   event: SocketEventName,
@@ -126,7 +131,7 @@ export function emitSocketEvent<T>(
     station?: string;
   }
 ): void {
-  if (!ioInstance) return;
+  if (isServerless || !ioInstance) return;
 
   if (options?.userId) {
     ioInstance.to(`user:${options.userId}`).emit(event, payload);
@@ -154,4 +159,3 @@ export function emitSocketEvent<T>(
 
   ioInstance.emit(event, payload);
 }
-

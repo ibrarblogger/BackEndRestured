@@ -3,11 +3,17 @@ import { app } from './app';
 import { env } from './config/env';
 import { logger } from './config/logger';
 import { connectDatabaseWithRetry, disconnectDatabase } from './config/prisma';
+import { registerBackgroundJobHandlers } from './jobs/handlers';
 import { jobQueue } from './jobs/queue';
 import { initSocketServer } from './sockets';
 
 const server = http.createServer(app);
+
+// Initialize persistent real-time Socket.io server
 initSocketServer(server);
+
+// Register background job handlers (BullMQ / In-memory)
+registerBackgroundJobHandlers();
 
 async function bootstrap() {
   await connectDatabaseWithRetry(3, 1500);
@@ -17,6 +23,7 @@ async function bootstrap() {
       `🚀 Restaurant Management System API + Socket.io running on ${env.API_BASE_URL} [${env.NODE_ENV}]`
     );
     logger.info(`📚 Swagger OpenAPI Docs available at ${env.API_BASE_URL}/api/docs`);
+    logger.info(`💚 Health checks at ${env.API_BASE_URL}/health and ${env.API_BASE_URL}/health/db`);
   });
 }
 
@@ -39,7 +46,7 @@ process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 bootstrap().catch((err) => {
-  logger.error({ err }, 'Fatal error during server bootstrap');
+  logger.error({ err: err?.message || err }, 'Fatal error during server bootstrap');
   process.exit(1);
 });
 
